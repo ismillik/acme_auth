@@ -1,5 +1,8 @@
 const Sequelize = require('sequelize');
 const { STRING } = Sequelize;
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+
 const config = {
   logging: false
 };
@@ -9,14 +12,19 @@ if(process.env.LOGGING){
 }
 const conn = new Sequelize(process.env.DATABASE_URL || 'postgres://localhost/acme_db', config);
 
+
 const User = conn.define('user', {
   username: STRING,
   password: STRING
 });
 
+User.addHook('beforeCreate', async(user) => {
+    user.password = await bcrypt.hash(user.password, 1);
+})
+
 User.byToken = async(token)=> {
   try {
-    const user = await User.findByPk(token);
+    const user = await User.findByPk(jwt.verify(token, process.env.JWT));
     if(user){
       return user;
     }
@@ -34,17 +42,17 @@ User.byToken = async(token)=> {
 User.authenticate = async({ username, password })=> {
   const user = await User.findOne({
     where: {
-      username,
-      password
+      username
     }
   });
-  if(user){
-    return user.id; 
+  if(user && await bcrypt.compare(password, user.password)){
+    return jwt.sign(user.id, process.env.JWT);
   }
   const error = Error('bad credentials');
   error.status = 401;
   throw error;
 };
+
 
 const syncAndSeed = async()=> {
   await conn.sync({ force: true });
